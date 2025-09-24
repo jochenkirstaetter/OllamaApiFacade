@@ -1,8 +1,9 @@
-﻿using System.Text.Json;
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
+using OllamaApiFacade.Diagnostics;
 using OllamaApiFacade.DTOs;
+using System.Text.Json;
 
 namespace OllamaApiFacade.Extensions;
 
@@ -17,22 +18,33 @@ public static class ChatMessageExtensions
     /// <remarks>
     /// This method sets the response content type to "application/json" and writes each chat message to the response stream as a JSON object.
     /// </remarks>
+    /// <exception cref="OllamaApiFacade.Diagnostics.DebugProxyNotRunningException">Thrown when the configured debug proxy is not running.</exception>
+    /// <exception cref="OllamaApiFacade.Diagnostics.ProxyHttp2IncompatibilityException">Thrown when an HTTP/2 incompatibility is detected with the proxy.</exception>
     public static async Task StreamToResponseAsync(this IAsyncEnumerable<StreamingChatMessageContent> messages, HttpResponse response)
     {
         response.ContentType = "application/json";
 
         await using var writer = new StreamWriter(response.BodyWriter.AsStream(), leaveOpen: true);
-        await foreach (var message in messages)
+        try
         {
-            ChatResponse chatResponse = message.ToChatResponse();
-
-            if (IsValidChatResponse(chatResponse))
+            await foreach (var message in messages)
             {
-                var jsonResponse = JsonSerializer.Serialize(chatResponse);
+                ChatResponse chatResponse = message.ToChatResponse();
 
-                await writer.WriteAsync(jsonResponse + "\n");
-                await writer.FlushAsync();
+                if (IsValidChatResponse(chatResponse))
+                {
+                    var jsonResponse = JsonSerializer.Serialize(chatResponse);
+
+                    await writer.WriteAsync(jsonResponse + "\n");
+                    await writer.FlushAsync();
+                }
             }
+        }
+        catch (Exception exception)
+        {
+            ProxyDiagnostics.ThrowIfProxyDown(exception);
+            ProxyHttp2Diagnostics.ThrowIfLikelyBurpHttp2(exception);
+            throw;
         }
     }
 
@@ -45,24 +57,35 @@ public static class ChatMessageExtensions
     /// <remarks>
     /// This method sets the response content type to "application/json" and writes each chat message to the response stream as a JSON object.
     /// </remarks>
+    /// <exception cref="OllamaApiFacade.Diagnostics.DebugProxyNotRunningException">Thrown when the configured debug proxy is not running.</exception>
+    /// <exception cref="OllamaApiFacade.Diagnostics.ProxyHttp2IncompatibilityException">Thrown when an HTTP/2 incompatibility is detected with the proxy.</exception>
     public static async Task StreamToResponseAsync(this Task<IReadOnlyList<ChatMessageContent>> chatMessages, HttpResponse response)
     {
         response.ContentType = "application/json";
 
         await using var writer = new StreamWriter(response.BodyWriter.AsStream(), leaveOpen: true);
 
-        var messages = await chatMessages;
-        foreach (var message in messages)
+        try
         {
-            ChatResponse chatResponse = message.ToChatResponse();
-
-            if (IsValidChatResponse(chatResponse))
+            var messages = await chatMessages;
+            foreach (var message in messages)
             {
-                var jsonResponse = JsonSerializer.Serialize(chatResponse);
+                ChatResponse chatResponse = message.ToChatResponse();
 
-                await writer.WriteAsync(jsonResponse + "\n");
-                await writer.FlushAsync();
+                if (IsValidChatResponse(chatResponse))
+                {
+                    var jsonResponse = JsonSerializer.Serialize(chatResponse);
+
+                    await writer.WriteAsync(jsonResponse + "\n");
+                    await writer.FlushAsync();
+                }
             }
+        }
+        catch (Exception exception)
+        {
+            ProxyDiagnostics.ThrowIfProxyDown(exception);
+            ProxyHttp2Diagnostics.ThrowIfLikelyBurpHttp2(exception);
+            throw;
         }
     }
 
